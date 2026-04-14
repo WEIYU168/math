@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>因式分解大挑戰</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            touch-action: none; /* 防止手機瀏覽器滑動刷新或縮放 */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: url('因式分解背景.png') center/cover no-repeat, linear-gradient(to bottom, #87CEEB, #E0F6FF);
+        }
+        canvas {
+            display: block;
+        }
+        /* 讓數學字體看起來更好看 */
+        .math-font {
+            font-family: "Times New Roman", Times, serif;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 遊戲 UI 層 -->
+    <div id="ui-layer" class="absolute inset-0 pointer-events-none flex flex-col justify-between z-10">
+        <!-- 頂部資訊列 -->
+        <div class="flex justify-between items-start p-4 md:p-6 drop-shadow-md">
+            <div class="bg-white/90 px-4 py-2 rounded-xl border-2 border-blue-300">
+                <div class="text-lg md:text-2xl font-bold text-gray-800" id="scoreDisplay">分數: 0</div>
+            </div>
+            
+            <div class="flex flex-col items-center">
+                <div class="bg-white px-6 py-3 rounded-2xl shadow-lg border-4 border-indigo-400 transform transition-transform duration-300" id="questionContainer">
+                    <div class="text-sm text-gray-500 font-bold text-center mb-1">請接住其中一個正確因式</div>
+                    <div class="text-2xl md:text-4xl font-bold text-indigo-700 math-font tracking-wide" id="questionDisplay">x² + 5x + 6</div>
+                </div>
+            </div>
+
+            <div class="flex flex-col items-end bg-white/90 px-4 py-2 rounded-xl border-2 border-blue-300">
+                <div class="text-lg md:text-2xl font-bold text-gray-800" id="timeDisplay">時間: 90s</div>
+                <div class="text-xl md:text-2xl tracking-widest mt-1" id="livesDisplay">❤️❤️❤️❤️❤️</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 開始畫面 -->
+    <div id="startScreen" class="absolute inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center border-4 border-blue-400">
+            <h1 class="text-4xl font-extrabold text-blue-600 mb-4 drop-shadow-sm">因式分解大挑戰</h1>
+            <p class="text-gray-600 mb-6 text-lg">
+                控制籃子接住正確的因式！<br>
+                接對加 10 分，接錯扣 1 命。<br>
+                你有 5 次錯誤機會，限時 90 秒。<br>
+                偶爾會有 ❤️ 掉落，可以補充生命喔！
+            </p>
+            <div class="flex justify-center gap-4 mb-6 text-gray-500 text-sm">
+                <div class="flex items-center gap-1"><kbd class="bg-gray-200 px-2 rounded">←</kbd> <kbd class="bg-gray-200 px-2 rounded">→</kbd> 移動</div>
+                <div>或 滑鼠/觸控 拖曳</div>
+            </div>
+            <button id="startBtn" class="bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold py-3 px-8 rounded-full text-xl hover:scale-105 transition-transform shadow-lg pointer-events-auto">
+                開始遊戲
+            </button>
+        </div>
+    </div>
+
+    <!-- 遊戲結束畫面 -->
+    <div id="gameOverScreen" class="absolute inset-0 bg-black/70 flex flex-col items-center justify-center z-50 hidden backdrop-blur-md pointer-events-auto">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center relative z-10">
+            <h1 class="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-yellow-500 mb-2">時間到！</h1>
+            <p class="text-2xl text-gray-700 font-bold mb-4">你的分數: <span id="finalScore" class="text-blue-600 text-4xl">0</span></p>
+            
+            <div id="newRecordSection" class="hidden mb-4 bg-yellow-100 p-4 rounded-xl">
+                <p class="text-yellow-700 font-bold mb-2">🎉 恭喜進入排行榜！ 🎉</p>
+                <input type="text" id="playerName" maxlength="8" placeholder="輸入你的名字" class="w-full px-3 py-2 border-2 border-yellow-300 rounded text-center focus:outline-none focus:border-yellow-500">
+            </div>
+
+            <div class="mb-6">
+                <h2 class="text-xl font-bold text-gray-800 mb-2 border-b-2 border-gray-200 pb-1">🏆 英雄榜 🏆</h2>
+                <ul id="leaderboardList" class="text-left space-y-1 text-gray-700 font-medium">
+                    <!-- 排行榜將由 JS 生成 -->
+                </ul>
+            </div>
+
+            <button id="restartBtn" class="bg-gradient-to-r from-green-400 to-green-600 text-white font-bold py-3 px-8 rounded-full text-xl hover:scale-105 transition-transform shadow-lg w-full">
+                再來一局
+            </button>
+        </div>
+        <!-- 讓背景有施放煙火的感覺，阻擋點擊穿透 -->
+    </div>
+
+    <!-- 遊戲畫布 -->
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // --- 題庫設定 ---
+        const mathQuestions = [
+            { q: "x² - 1", c: ["x - 1", "x + 1"], w: ["x - 2", "x² + 1", "x + 2", "x - 4"] },
+            { q: "x² - 4", c: ["x - 2", "x + 2"], w: ["x - 4", "x + 4", "x - 1"] },
+            { q: "x² - 9", c: ["x - 3", "x + 3"], w: ["x - 9", "x + 9", "x + 1", "x - 1"] },
+            { q: "x² + 3x + 2", c: ["x + 1", "x + 2"], w: ["x + 3", "x - 1", "x - 2", "x + 4"] },
+            { q: "x² + 5x + 6", c: ["x + 2", "x + 3"], w: ["x + 1", "x + 6", "x - 2", "x + 5"] },
+            { q: "x² - 5x + 6", c: ["x - 2", "x - 3"], w: ["x + 2", "x + 3", "x - 6", "x + 6"] },
+            { q: "x² - x - 2", c: ["x - 2", "x + 1"], w: ["x + 2", "x - 1", "x - 3"] },
+            { q: "x² + 2x - 8", c: ["x + 4", "x - 2"], w: ["x - 4", "x + 2", "x - 8", "x + 8"] },
+            { q: "x² - 2x - 8", c: ["x - 4", "x + 2"], w: ["x + 4", "x - 2", "x - 8", "x - 6"] },
+            { q: "x² + 6x + 9", c: ["x + 3"], w: ["x - 3", "x + 9", "x + 6"] },
+            { q: "x² - 6x + 9", c: ["x - 3"], w: ["x + 3", "x - 9", "x - 6"] },
+            { q: "x² - 7x + 10", c: ["x - 2", "x - 5"], w: ["x + 2", "x + 5", "x - 7"] },
+            { q: "x² + 7x + 12", c: ["x + 3", "x + 4"], w: ["x + 7", "x - 3", "x - 4"] },
+            { q: "x² - x - 12", c: ["x - 4", "x + 3"], w: ["x + 4", "x - 3", "x - 12"] },
+            { q: "2x² - 2", c: ["2(x - 1)", "x + 1"], w: ["x - 2", "2x - 1", "2(x + 2)"] }
+        ];
+
+        // --- 遊戲全域變數 ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // 音效設定 (使用 Web Audio API 生成音效，不需外部檔案)
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            const now = audioCtx.currentTime;
+            if (type === 'correct') {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(600, now);
+                oscillator.frequency.exponentialRampToValueAtTime(1200, now + 0.1);
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                oscillator.start(now);
+                oscillator.stop(now + 0.1);
+            } else if (type === 'wrong') {
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(300, now);
+                oscillator.frequency.exponentialRampToValueAtTime(100, now + 0.2);
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                oscillator.start(now);
+                oscillator.stop(now + 0.2);
+            } else if (type === 'heart') {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(400, now);
+                oscillator.frequency.setValueAtTime(800, now + 0.1);
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                oscillator.start(now);
+                oscillator.stop(now + 0.2);
+            } else if (type === 'gameover') {
+                oscillator.type = 'triangle';
+                oscillator.frequency.setValueAtTime(400, now);
+                oscillator.frequency.exponentialRampToValueAtTime(50, now + 1.5);
+                gainNode.gain.setValueAtTime(0.5, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.5);
+                oscillator.start(now);
+                oscillator.stop(now + 1.5);
+            }
+        }
+
+        let gameState = 'start'; // start, playing, gameover
+        let score = 0;
+        let lives = 5;
+        const maxLives = 5;
+        let timeLeft = 90;
+        let currentQuestion = null;
+        let lastTime = 0;
+        let itemSpawnTimer = 0;
+        let countdownTimerId = null;
+        let pendingClearItems = false; // 新增變數：延遲清理因式，避免干擾陣列迴圈
+
+        let items = [];
+        let floatingTexts = [];
+        let fireworks = [];
+        let particles = [];
+
+        // 玩家 (籃子)
+        const player = {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 80,
+            targetX: 0,
+            emoji: '🧺'
+        };
+
+        // 按鍵狀態
+        const keys = {
+            ArrowLeft: false,
+            ArrowRight: false
+        };
+
+        // UI 元素
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const questionDisplay = document.getElementById('questionDisplay');
+        const timeDisplay = document.getElementById('timeDisplay');
+        const livesDisplay = document.getElementById('livesDisplay');
+        const questionContainer = document.getElementById('questionContainer');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScore = document.getElementById('finalScore');
+        const leaderboardList = document.getElementById('leaderboardList');
+        const newRecordSection = document.getElementById('newRecordSection');
+        const playerNameInput = document.getElementById('playerName');
+
+        // --- 初始化與事件監聽 ---
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            player.y = canvas.height - player.height - 20; // 距離底部 20px
+            if (gameState === 'start') {
+                player.x = canvas.width / 2;
+                player.targetX = player.x;
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // 鍵盤控制
+        window.addEventListener('keydown', (e) => {
+            if (keys.hasOwnProperty(e.code)) keys[e.code] = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.code)) keys[e.code] = false;
+        });
+
+        // 滑鼠與觸控控制
+        function movePlayerTo(clientX) {
+            if (gameState !== 'playing') return;
+            player.targetX = clientX;
+        }
+        
+        canvas.addEventListener('mousemove', (e) => movePlayerTo(e.clientX));
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault(); // 防止滾動
+            movePlayerTo(e.touches[0].clientX);
+        }, { passive: false });
+        canvas.addEventListener('touchstart', (e) => {
+            movePlayerTo(e.touches[0].clientX);
+        }, { passive: true });
+
+        // 按鈕
+        document.getElementById('startBtn').addEventListener('click', startGame);
+        document.getElementById('restartBtn').addEventListener('click', () => {
+            saveScore();
+            startGame();
+        });
+
+        // --- 核心物件類別 ---
+
+        class FallingItem {
+            constructor(x, text, type) {
+                this.x = x;
+                this.y = -60; // 從螢幕上方外面開始掉落
+                this.width = type === 'heart' ? 40 : 120;
+                this.height = type === 'heart' ? 40 : 50;
+                this.text = text;
+                this.type = type; // 'correct', 'wrong', 'heart'
+                // 依螢幕高度動態調整掉落速度，大約 4-6 秒落到底部
+                let baseSpeed = canvas.height / 5; 
+                this.speed = baseSpeed + (Math.random() * baseSpeed * 0.4) - (baseSpeed * 0.2); // 隨機變化
+                
+                // 動畫用
+                this.wobblePhase = Math.random() * Math.PI * 2;
+                this.wobbleSpeed = 2 + Math.random() * 2;
+            }
+
+            update(dt) {
+                this.y += this.speed * dt;
+                this.wobblePhase += this.wobbleSpeed * dt;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                // 稍微左右飄動增加動態感
+                let displayX = this.x + Math.sin(this.wobblePhase) * 10;
+                ctx.translate(displayX, this.y);
+
+                if (this.type === 'heart') {
+                    ctx.font = '35px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('❤️', 0, 0);
+                } else {
+                    // 畫泡泡/方塊
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.shadowColor = 'rgba(0,0,0,0.15)';
+                    ctx.shadowBlur = 10;
+                    ctx.shadowOffsetY = 5;
+                    
+                    // 圓角矩形
+                    ctx.beginPath();
+                    ctx.roundRect(-this.width/2, -this.height/2, this.width, this.height, 15);
+                    ctx.fill();
+
+                    // 邊框
+                    ctx.lineWidth = 3;
+                    ctx.strokeStyle = '#93C5FD'; // blue-300
+                    ctx.stroke();
+
+                    // 文字
+                    ctx.shadowColor = 'transparent';
+                    ctx.fillStyle = '#1E3A8A'; // blue-900
+                    ctx.font = 'bold 22px "Times New Roman", serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(this.text, 0, 0);
+                }
+                ctx.restore();
+            }
+        }
+
+        class FloatingText {
+            constructor(x, y, text, color) {
+                this.x = x;
+                this.y = y;
+                this.text = text;
+                this.color = color;
+                this.life = 1.0; // 1秒壽命
+            }
+            update(dt) {
+                this.y -= 50 * dt; // 向上飄
+                this.life -= dt;
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, this.life);
+                ctx.fillStyle = this.color;
+                ctx.font = 'bold 30px Arial';
+                ctx.textAlign = 'center';
+                
+                // 文字描邊讓它更清楚
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 4;
+                ctx.strokeText(this.text, this.x, this.y);
+                ctx.fillText(this.text, this.x, this.y);
+                ctx.restore();
+            }
+        }
+
+        // --- 煙火粒子系統 ---
+        class Particle {
+            constructor(x, y, color, speed, angle, friction, gravity, life) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                this.friction = friction;
+                this.gravity = gravity;
+                this.life = life;
+                this.maxLife = life;
+                this.size = Math.random() * 3 + 2;
+            }
+            update(dt) {
+                this.vx *= this.friction;
+                this.vy *= this.friction;
+                this.vy += this.gravity * dt * 60; // 重力
+                this.x += this.vx * dt * 60;
+                this.y += this.vy * dt * 60;
+                this.life -= dt;
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, this.life / this.maxLife);
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class Firework {
+            constructor() {
+                this.x = Math.random() * canvas.width;
+                this.y = canvas.height;
+                this.targetY = canvas.height * 0.1 + Math.random() * (canvas.height * 0.4);
+                this.speed = 400 + Math.random() * 200;
+                this.exploded = false;
+                this.color = `hsl(${Math.random() * 360}, 100%, 60%)`;
+            }
+            update(dt) {
+                if (!this.exploded) {
+                    this.y -= this.speed * dt;
+                    if (this.y <= this.targetY) {
+                        this.explode();
+                    }
+                }
+            }
+            explode() {
+                this.exploded = true;
+                const particleCount = 60 + Math.random() * 40;
+                for (let i = 0; i < particleCount; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = Math.random() * 8 + 2;
+                    particles.push(new Particle(
+                        this.x, this.y, this.color, speed, angle, 0.95, 0.1, 1 + Math.random() * 0.5
+                    ));
+                }
+            }
+            draw(ctx) {
+                if (!this.exploded) {
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        // --- 遊戲邏輯 ---
+
+        function startGame() {
+            if (audioCtx.state === 'suspended') audioCtx.resume(); // 喚醒音效引擎
+            gameState = 'playing';
+            score = 0;
+            lives = maxLives;
+            timeLeft = 90;
+            items = [];
+            floatingTexts = [];
+            fireworks = [];
+            particles = [];
+            pendingClearItems = false; // 重設標記
+            player.x = canvas.width / 2;
+            player.targetX = player.x;
+            
+            updateUI();
+            setNewQuestion();
+            
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            document.getElementById('ui-layer').classList.remove('hidden');
+
+            if (countdownTimerId) clearInterval(countdownTimerId);
+            countdownTimerId = setInterval(() => {
+                if (gameState === 'playing') {
+                    timeLeft--;
+                    updateUI();
+                    if (timeLeft <= 0) {
+                        endGame();
+                    }
+                }
+            }, 1000);
+
+            lastTime = performance.now();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function setNewQuestion() {
+            // 隨機選一題，且盡量不與上一題重複
+            let newQ = currentQuestion;
+            while(newQ === currentQuestion) {
+                newQ = mathQuestions[Math.floor(Math.random() * mathQuestions.length)];
+            }
+            currentQuestion = newQ;
+            questionDisplay.innerText = currentQuestion.q;
+            
+            // 題目動畫
+            questionContainer.classList.remove('scale-110', 'border-green-400');
+            void questionContainer.offsetWidth; // 觸發重繪
+            questionContainer.classList.add('scale-110', 'border-green-400');
+            setTimeout(() => {
+                questionContainer.classList.remove('scale-110', 'border-green-400');
+            }, 300);
+
+            // 移除直接過濾陣列的行為，避免在迴圈中發生 TypeError
+        }
+
+        function spawnItem() {
+            const padding = 60;
+            const x = padding + Math.random() * (canvas.width - padding * 2);
+            
+            // 決定種類：10% 愛心，90% 因式
+            if (Math.random() < 0.1) {
+                items.push(new FallingItem(x, '', 'heart'));
+            } else {
+                // 因式：35% 正確，65% 錯誤 (確保畫面上常有正確答案但干擾較多)
+                let type, text;
+                if (Math.random() < 0.35) {
+                    type = 'correct';
+                    text = currentQuestion.c[Math.floor(Math.random() * currentQuestion.c.length)];
+                } else {
+                    type = 'wrong';
+                    text = currentQuestion.w[Math.floor(Math.random() * currentQuestion.w.length)];
+                }
+                items.push(new FallingItem(x, text, type));
+            }
+        }
+
+        function updateUI() {
+            scoreDisplay.innerText = `分數: ${score}`;
+            timeDisplay.innerText = `時間: ${timeLeft}s`;
+            if(timeLeft <= 10) {
+                timeDisplay.classList.add('text-red-600', 'animate-pulse');
+            } else {
+                timeDisplay.classList.remove('text-red-600', 'animate-pulse');
+            }
+
+            let hearts = '';
+            for (let i = 0; i < maxLives; i++) {
+                hearts += i < lives ? '❤️' : '🖤';
+            }
+            livesDisplay.innerText = hearts;
+        }
+
+        function checkCollision(item) {
+            // 簡單的 AABB 碰撞，稍微縮小碰撞框讓手感變好
+            const hitBoxShrink = 20;
+            const px = player.x - player.width/2 + hitBoxShrink;
+            const py = player.y - player.height/2 + hitBoxShrink;
+            const pw = player.width - hitBoxShrink*2;
+            const ph = player.height - hitBoxShrink*2;
+
+            const ix = item.x - item.width/2;
+            const iy = item.y - item.height/2;
+            const iw = item.width;
+            const ih = item.height;
+
+            return (px < ix + iw &&
+                    px + pw > ix &&
+                    py < iy + ih &&
+                    py + ph > iy);
+        }
+
+        function endGame() {
+            gameState = 'gameover';
+            clearInterval(countdownTimerId);
+            playSound('gameover');
+            
+            // 隱藏頂部 UI，顯示結束畫面
+            document.getElementById('ui-layer').classList.add('hidden');
+            gameOverScreen.classList.remove('hidden');
+            finalScore.innerText = score;
+
+            // 處理排行榜
+            handleLeaderboard();
+        }
+
+        // --- 排行榜邏輯 (LocalStorage) ---
+        function getLeaderboard() {
+            const data = localStorage.getItem('factorization_leaderboard');
+            if (data) {
+                return JSON.parse(data);
+            }
+            // 預設假資料
+            return [
+                { name: '數學天才', score: 200 },
+                { name: '高斯', score: 150 },
+                { name: '尤拉', score: 100 },
+                { name: '小明', score: 50 },
+                { name: '新手', score: 20 }
+            ];
+        }
+
+        function handleLeaderboard() {
+            const leaderboard = getLeaderboard();
+            const minScore = leaderboard[leaderboard.length - 1]?.score || 0;
+            
+            if (score > minScore || leaderboard.length < 5) {
+                newRecordSection.classList.remove('hidden');
+                playerNameInput.value = '';
+                playerNameInput.focus();
+            } else {
+                newRecordSection.classList.add('hidden');
+            }
+            renderLeaderboard(leaderboard);
+        }
+
+        function saveScore() {
+            if (!newRecordSection.classList.contains('hidden')) {
+                let name = playerNameInput.value.trim();
+                if (!name) name = '無名氏';
+                
+                let leaderboard = getLeaderboard();
+                leaderboard.push({ name: name, score: score });
+                // 排序並取前 5 名
+                leaderboard.sort((a, b) => b.score - a.score);
+                leaderboard = leaderboard.slice(0, 5);
+                
+                localStorage.setItem('factorization_leaderboard', JSON.stringify(leaderboard));
+                newRecordSection.classList.add('hidden');
+            }
+        }
+
+        function renderLeaderboard(leaderboard) {
+            leaderboardList.innerHTML = '';
+            const medals = ['🥇', '🥈', '🥉', '４', '５'];
+            leaderboard.forEach((entry, index) => {
+                const li = document.createElement('li');
+                li.className = `flex justify-between items-center bg-gray-50 p-2 rounded ${index === 0 ? 'bg-yellow-50 text-yellow-800 font-bold' : ''}`;
+                const isCurrentScore = (entry.score === score && index === leaderboard.findIndex(e => e.score === score)); // 簡單標示
+                li.innerHTML = `<span>${medals[index] || ''} ${entry.name}</span> <span class="text-blue-600">${entry.score} 分</span>`;
+                leaderboardList.appendChild(li);
+            });
+        }
+
+
+        // --- 主遊戲迴圈 ---
+        function update(dt) {
+            if (gameState !== 'playing' && gameState !== 'gameover') return;
+
+            // 鍵盤移動邏輯
+            const speed = 500 * dt;
+            if (keys.ArrowLeft) player.targetX -= speed;
+            if (keys.ArrowRight) player.targetX += speed;
+
+            // 限制目標位置在畫布內
+            player.targetX = Math.max(player.width/2, Math.min(canvas.width - player.width/2, player.targetX));
+
+            // 平滑移動籃子
+            player.x += (player.targetX - player.x) * 15 * dt;
+
+            // 遊戲進行中的邏輯
+            if (gameState === 'playing') {
+                // 生成物品
+                itemSpawnTimer -= dt;
+                if (itemSpawnTimer <= 0) {
+                    spawnItem();
+                    itemSpawnTimer = 0.8 + Math.random() * 0.7; // 每 0.8~1.5 秒生成一個
+                }
+
+                // 更新與碰撞物品
+                for (let i = items.length - 1; i >= 0; i--) {
+                    let item = items[i];
+                    
+                    // 防禦性檢查：若項目不存在則跳過
+                    if (!item) continue;
+
+                    item.update(dt);
+
+                    // 碰撞偵測
+                    if (checkCollision(item)) {
+                        if (item.type === 'heart') {
+                            playSound('heart');
+                            if (lives < maxLives) {
+                                lives++;
+                                floatingTexts.push(new FloatingText(player.x, player.y - 40, '+1命', '#10B981'));
+                            } else {
+                                score += 5;
+                                floatingTexts.push(new FloatingText(player.x, player.y - 40, '+5', '#3B82F6'));
+                            }
+                        } else if (item.type === 'correct') {
+                            playSound('correct');
+                            score += 10;
+                            floatingTexts.push(new FloatingText(player.x, player.y - 40, '答對！ +10', '#10B981'));
+                            setNewQuestion();
+                            pendingClearItems = true; // 標記為需要清理（延遲到迴圈結束）
+                        } else if (item.type === 'wrong') {
+                            playSound('wrong');
+                            lives--;
+                            floatingTexts.push(new FloatingText(player.x, player.y - 40, '錯誤！ -1命', '#EF4444'));
+                            // 畫面震動特效 (簡單版: 操作 DOM 或留白)
+                            document.body.style.transform = `translateX(${(Math.random()-0.5)*10}px)`;
+                            setTimeout(() => document.body.style.transform = 'none', 50);
+
+                            if (lives <= 0) {
+                                lives = 0;
+                                updateUI();
+                                endGame();
+                                items.splice(i, 1); // 避免重複觸發
+                                continue;
+                            }
+                        }
+                        
+                        updateUI();
+                        items.splice(i, 1);
+                        continue; // 已移除該物品，跳下一個
+                    }
+
+                    // 掉出螢幕外則移除
+                    if (item.y > canvas.height + 100) {
+                        items.splice(i, 1);
+                    }
+                }
+                
+                // 在迴圈外安全地清理舊因式，避免干擾索引
+                if (pendingClearItems) {
+                    items = items.filter(item => item && item.type === 'heart');
+                    pendingClearItems = false;
+                }
+            }
+
+            // 更新漂浮文字
+            for (let i = floatingTexts.length - 1; i >= 0; i--) {
+                let ft = floatingTexts[i];
+                if (!ft) continue;
+                ft.update(dt);
+                if (ft.life <= 0) floatingTexts.splice(i, 1);
+            }
+
+            // 遊戲結束時的煙火特效
+            if (gameState === 'gameover') {
+                if (Math.random() < 0.05) { // 隨機發射煙火
+                    fireworks.push(new Firework());
+                }
+                
+                for (let i = fireworks.length - 1; i >= 0; i--) {
+                    let fw = fireworks[i];
+                    if (!fw) continue;
+                    fw.update(dt);
+                    if (fw.exploded) fireworks.splice(i, 1);
+                }
+                
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    let p = particles[i];
+                    if (!p) continue;
+                    p.update(dt);
+                    if (p.life <= 0) particles.splice(i, 1);
+                }
+            }
+        }
+
+        function draw() {
+            // 清除畫布 (背景由 CSS 處理，這裡如果要有漸層可重畫，或直接 clearRect 變透明)
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (gameState === 'playing' || gameState === 'gameover') {
+                // 畫籃子
+                ctx.font = '70px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(player.emoji, player.x, player.y);
+
+                // 畫掉落物
+                items.forEach(item => item && item.draw(ctx));
+
+                // 畫漂浮文字
+                floatingTexts.forEach(ft => ft && ft.draw(ctx));
+
+                // 畫煙火
+                if (gameState === 'gameover') {
+                    fireworks.forEach(fw => fw && fw.draw(ctx));
+                    particles.forEach(p => p && p.draw(ctx));
+                }
+            }
+        }
+
+        function gameLoop(currentTime) {
+            let dt = (currentTime - lastTime) / 1000;
+            // 避免切換分頁後 dt 過大導致穿牆
+            if (dt > 0.1) dt = 0.1; 
+            lastTime = currentTime;
+
+            update(dt);
+            draw();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- 啟動第一格 ---
+        resizeCanvas();
+        draw(); // 畫初始狀態
+
+    </script>
+</body>
+</html>
